@@ -28,6 +28,10 @@ int_type = settings.dtypes.int_type
 
 
 class GPLVM(BayesianGPLVM):
+    """
+    Bayesian GPLVM with partial predictions. Some code (e.g., KL and marginal bound) is based on the original authors
+    of the BayesianGPLVM in GPflow.
+    """
 
     def build_likelihood(self):
         """
@@ -43,15 +47,6 @@ class GPLVM(BayesianGPLVM):
         return bound - KL
 
     def _build_marginal_bound(self, X_mean, X_var, Y):
-        """
-        Construct a tensorflow function to compute the bound on the marginal
-        likelihood given a Gaussian multivariate distribution representing
-        X (and its priors) and observed Y
-
-        Split from the general build_likelihood method, as the graph is reused by the held_out_data_objective
-        method for inference of latent points for new data points
-        """
-
         num_inducing = tf.shape(self.Z)[0]
         D = tf.constant(self.output_dim, dtype=float_type)
 
@@ -92,12 +87,13 @@ class GPLVM(BayesianGPLVM):
 
     def build_predict_density(self, Xstarmu, Xstarvar):
         """
-        Build the graph to map a latent point to its corresponding output. Unlike build_predict, here a
-        Gaussian density is mapped rather than only its mean as in build_predict. Details of the calculation
-        are in the gplvm predict x notebook.
+        Build the graph to map a latent point to its corresponding output.
 
-        :param Xstarmu: mean of the points in latent space size: Nnew (number of new points ) x Q (latent dim)
-        :param Xstarvar: variance of the points in latent space size: Nnew (number of new points ) x Q (latent dim)
+        Unlike build_predict, here a Gaussian density is mapped rather than only its mean as in build_predict. Details
+        of the calculation can be found in the documentation (gplvm_predict_density notebook).
+
+        :param ndarray Xstarmu: mean of the points in latent space size: Nnew (number of new points ) x Q (latent dim)
+        :param ndarray Xstarvar: variance of the points in latent space size: Nnew (number of new points ) x Q (latent dim)
         :return: tensor for computation of the moments of the output distribution.
         """
         num_inducing = tf.shape(self.Z)[0] # M
@@ -147,10 +143,11 @@ class GPLVM(BayesianGPLVM):
     def held_out_data_objective(self, Ynew, mu, var, observed):
         """
         TF computation of likelihood objective + gradients, given new observed points and a candidate q(X*)
-        :param Ynew: new observed points, size Nnew (number of new points) x k (observed dimensions), with k <= D.
-        :param mu: candidate mean, np.ndarray of size Nnew (number of new points) x Q (latent dimensions)
-        :param var: candidate variance, np.ndarray of size Nnew (number of new points) x Q (latent dimensions)
-        :param observed: indices for the observed dimensions np.ndarray of size k
+
+        :param ndarray Ynew: new observed points: Nnew (number of new points) x k (observed dimensions), with k <= D.
+        :param ndarray mu: candidate mean: Nnew (number of new points) x Q (latent dimensions)
+        :param ndarray var: candidate variance: Nnew (number of new points) x Q (latent dimensions)
+        :param list observed: indices for the observed dimensions np.ndarray of size k
         :return: returning a tuple (objective,gradients). gradients is a list of 2 matrices for mu and var of size
         Nnew x Q
         """
@@ -177,9 +174,10 @@ class GPLVM(BayesianGPLVM):
     def _held_out_data_wrapper_creator(self, Ynew, observed):
         """
         Private wrapper function for returning an objective function accepted by scipy.optimize.minimize
-        :param Ynew: new observed points, size Nnew (number of new points) x k (observed dimensions)
+
+        :param ndarray Ynew: new observed points: Nnew (number of new points) x k (observed dimensions)
         :return: function accepting a flat numpy array of size 2 * Nnew (number of new points) * Q (latent dimensions)
-        and returning a tuple (objective,gradient)
+         and returning a tuple (objective,gradient)
         """
         infer_number = Ynew.shape[0]
         half_num_param = infer_number * self.num_latent
@@ -204,12 +202,11 @@ class GPLVM(BayesianGPLVM):
 
         It is automatically assumed all dimensions D were observed unless the observed parameter is specified.
 
-        :param Ynew: new observed points, size Nnew (number of new points) x k (observed dimensions). with k <= D.
-        :param method: method is a string (default 'L-BFGS-B') specifying the scipy optimization routine
-        :param tol: tol is the tolerance to be passed to the optimization routine
-        :param kern: kernel specification, by default RBF
-        :param return_logprobs: return the likelihood probability after optimization (default: False)
-        :param observed: list of dimensions specified with length k. None (the default) indicates all D were observed
+        :param ndarray Ynew: new observed points: Nnew (number of new points) x k (observed dimensions). with k <= D.
+        :param string method: (default 'L-BFGS-B') specify the scipy optimization routine
+        :param float tol: (default None) tol is the tolerance to be passed to the optimization routine
+        :param boolean return_logprobs: (default: False) return the likelihood probability after optimization
+        :param list observed: dimensions specified with length k. None (the default) indicates all D were observed
         :param kwargs: passed on to the options field of the scipy minimizer
 
         :returns (mean, var) or (mean, var, prob) in case return_logprobs is true.
@@ -253,11 +250,11 @@ class GPLVM(BayesianGPLVM):
 
         Note: this method is only available in combination with Constant or Zero mean functions.
 
-        :param Xstarmu: mean of the points in latent space size: Nnew (number of new points ) x Q (latent dim)
-        :param Xstarvar: variance of the points in latent space size: Nnew (number of new points ) x Q (latent dim)
+        :param ndarray Xstarmu: mean of the points in latent space size: Nnew (number of new points ) x Q (latent dim)
+        :param ndarray Xstarvar: variance of the points in latent space size: Nnew (number of new points ) x Q (latent dim)
         :returns (mean, covar)
         :rtype mean: np.ndarray, size Nnew (number of new points ) x D
-        covar: np.ndarray, size Nnew (number of new points ) x D x D
+         covar: np.ndarray, size Nnew (number of new points ) x D x D
         """
         assert isinstance(self.mean_function, (Zero, Constant))
         return self.build_predict_density(Xstarmu, Xstarvar)
@@ -285,13 +282,13 @@ class GPLVM(BayesianGPLVM):
 
             p(F^U_* | Y^O_*, X, X_*)
 
-        :param Ynew: new observed points, size Nnew (number of new points) x k (observed dimensions),
-        with k <= D.
-        :param observed: 1D list or array of indices of observed dimensions, size D-k. Should at least contain one
-        observed dimension, and at most all dimensions.
+        :param ndarray Ynew: new observed points, size Nnew (number of new points) x k (observed dimensions),
+         with k <= D.
+        :param list observed: 1D iterable of ints, indices of observed dimensions, size D-k. Should at least contain one
+         observed dimension, and at most all dimensions.
         :returns (mean, covar) of non-Gaussian predictive distribution over the unobserved dimensions
         :rtype mean: np.ndarray, size Nnew (number of new points ) x D-k
-        covar: np.ndarray, size Nnew (number of new points ) x D-k x D-k
+         covar: np.ndarray, size Nnew (number of new points ) x D-k x D-k
         """
         observed = np.unique(np.atleast_1d(observed))
         assert(0 < observed.size <= self.output_dim)
@@ -316,13 +313,13 @@ class GPLVM(BayesianGPLVM):
 
             p(Y^U_* | Y^O_*, X, X_*)
 
-        :param Ynew: new observed points, size Nnew (number of new points) x k (observed dimensions),
-        with k <= D.
-        :param observed: 1D list or array of indices of observed dimensions, size D-k. Should at least contain one
-        observed dimension, and at most all dimensions.
+        :param ndarray Ynew: new observed points, size Nnew (number of new points) x k (observed dimensions),
+         with k <= D.
+        :param observed: 1D iterable of ints, indices of observed dimensions, size D-k. Should at least contain one
+         observed dimension, and at most all dimensions.
         :returns (mean, covar) of non-Gaussian predictive distribution over the unobserved dimensions
         :rtype mean: np.ndarray, size Nnew (number of new points ) x D-k
-        covar: np.ndarray, size Nnew (number of new points ) x D-k x D-k
+         covar: np.ndarray, size Nnew (number of new points ) x D-k x D-k
         """
         observed = np.unique(np.atleast_1d(observed))
         assert(0 < observed.size <= self.output_dim)
